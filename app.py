@@ -1,44 +1,43 @@
+import requests
 import streamlit as st
-from modules.api import ORATSClient
 
-st.set_page_config(page_title="Calendar Spread Evaluator", layout="wide")
+class ORATSClient:
+    def __init__(self):
+        self.base = st.secrets["orats"]["base_url"]
+        self.token = st.secrets["orats"]["api_key"]
 
-st.title("📉 Calendar Spread Evaluator\n(ORATS Delayed Data)")
+    # -----------------------------
+    # VALID DELAYED ENDPOINT: /strikes
+    # -----------------------------
+    def get_strikes(self, ticker: str):
+        url = f"{self.base}/strikes"
+        params = {
+            "ticker": ticker,
+            "token": self.token
+        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        return r.json()
 
-ticker = st.text_input("Ticker", value="SLV")
+    # -----------------------------
+    # VALID DELAYED ENDPOINT: /summaries
+    # -----------------------------
+    def get_summary(self, ticker: str, expiration: str):
+        url = f"{self.base}/summaries"
+        params = {
+            "ticker": ticker,
+            "token": self.token
+        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
 
-client = ORATSClient()
+        # filter summary for the expiration
+        summaries = [d for d in data if d.get("expirDate") == expiration]
 
-@st.cache_data
-def load_expirations(ticker):
-    data = client.get_expirations(ticker)
-    # API returns list like [{"expiration": "2025-01-17"}, ...]
-    try:
-        return sorted([item["expiration"] for item in data])
-    except Exception:
-        return []
+        if not summaries:
+            return None
 
-expirations = []
-if ticker:
-    try:
-        expirations = load_expirations(ticker)
-    except Exception as e:
-        st.error(f"Error fetching expirations: {e}")
-
-if expirations:
-    front_exp = st.selectbox("Front Expiration", expirations)
-    back_exp = st.selectbox("Back Expiration", expirations)
-else:
-    st.warning("No expirations returned for this ticker.")
-    st.stop()
-
-if st.button("Evaluate"):
-    st.subheader("Raw Strike Data (Delayed)")
-
-    try:
-        strikes = client.get_strikes(ticker, front_exp)
-        st.write(strikes)
-    except Exception as e:
-        st.error(f"Error loading strike data: {e}")
+        return summaries[0]
 
 
