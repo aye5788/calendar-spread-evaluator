@@ -1,58 +1,42 @@
 import requests
 import streamlit as st
 
-@st.cache_data
-def get_orats_base():
-    return st.secrets["orats"]["base_url"]
-
-@st.cache_data
-def get_orats_token():
-    return st.secrets["orats"]["api_key"]
-
-
 class ORATSClient:
     def __init__(self):
-        self.base = get_orats_base()
-        self.token = get_orats_token()
+        self.base = st.secrets["orats"]["base_url"]
+        self.token = st.secrets["orats"]["api_key"]
 
-    def fetch(self, endpoint, params=None):
-        if params is None:
-            params = {}
-
-        # ALL delayed ORATS endpoints require token as query param
-        params["token"] = self.token
-
-        url = f"{self.base}/{endpoint}"
-
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
-
-    def get_expirations(self, ticker):
-        # Delayed API: /datav2/expirations?ticker=SLV&token=XXX
-        return self.fetch("expirations", {"ticker": ticker})
-
-    def get_summary(self, ticker):
-        # Delayed API: /datav2/summaries?ticker=SLV&token=XXX
-        data = self.fetch("summaries", {"ticker": ticker})
-        return data[0] if isinstance(data, list) and data else None
-
-    def get_strikes(self, ticker, expiry):
-        # need dte from summary
-        summary = self.get_summary(ticker)
-        if not summary:
-            return None
-
-        dte = summary.get("dte")
-        if dte is None:
-            return None
-
-        # Delayed strikes endpoint requires: ticker, dte, fields
+    # -----------------------------
+    # VALID DELAYED ENDPOINT: /strikes
+    # -----------------------------
+    def get_strikes(self, ticker: str):
+        url = f"{self.base}/strikes"
         params = {
             "ticker": ticker,
-            "dte": dte,
-            "fields": "strike,callBid,callAsk,putBid,putAsk"
+            "token": self.token
         }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        return r.json()
 
-        return self.fetch("strikes", params)
+    # -----------------------------
+    # VALID DELAYED ENDPOINT: /summaries
+    # -----------------------------
+    def get_summary(self, ticker: str, expiration: str):
+        url = f"{self.base}/summaries"
+        params = {
+            "ticker": ticker,
+            "token": self.token
+        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        # filter summary for the expiration
+        summaries = [d for d in data if d.get("expirDate") == expiration]
+
+        if not summaries:
+            return None
+
+        return summaries[0]
 
