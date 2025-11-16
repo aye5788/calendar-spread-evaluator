@@ -3,18 +3,22 @@ import streamlit as st
 
 class ORATSClient:
     def __init__(self):
-        self.api_key = st.secrets["orats"]["api_key"]
-        self.base = st.secrets["orats"]["base_url"]   # https://api.orats.io/datav2
-        self.headers = {"Authorization": f"Bearer {self.api_key}"}
+        self.token = st.secrets["orats"]["api_key"]
+        self.base = st.secrets["orats"]["base_url"]  # https://api.orats.io/datav2
 
     def fetch(self, endpoint, params=None):
-        """Call ORATS Delayed Data API."""
+        if params is None:
+            params = {}
+
+        # ORATS DELAYED API REQUIRES token AS QUERY PARAM
+        params["token"] = self.token
+
         url = f"{self.base}/{endpoint}"
-        response = requests.get(url, headers=self.headers, params=params)
+        response = requests.get(url, params=params)
         response.raise_for_status()
         return response.json()
 
-    # ---- Valid Delayed Data Endpoints ----
+    # ---- Endpoints ----
 
     def get_summaries(self, ticker):
         return self.fetch("summaries", {"ticker": ticker})
@@ -28,10 +32,8 @@ class ORATSClient:
             params["expirations"] = expiry
         return self.fetch("strikes", params)
 
-    # ---- Expirations must be derived from STRIKES ----
-
     def get_expirations(self, ticker):
-        strikes = self.fetch("strikes", {"ticker": ticker})
-        expirations = sorted({item["expiration"] for item in strikes})
+        data = self.get_strikes(ticker)
+        expirations = sorted({item["expiration"] for item in data})
         return expirations
 
