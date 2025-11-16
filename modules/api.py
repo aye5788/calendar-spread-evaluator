@@ -9,9 +9,9 @@ class ORATSClient:
 
     def fetch(self, endpoint, params=None):
         url = f"{self.base}/{endpoint}"
-        r = requests.get(url, headers=self.headers, params=params)
-        r.raise_for_status()
-        return r.json()
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        return response.json()
 
     def get_summaries(self, ticker):
         return self.fetch("summaries", {"tickers": ticker})
@@ -20,8 +20,7 @@ class ORATSClient:
         return self.fetch("monies", {"tickers": ticker})
 
     def get_strikes(self, ticker, expiry):
-        return self.fetch("strikes",
-                          {"tickers": ticker, "expirations": expiry})
+        return self.fetch("strikes", {"tickers": ticker, "expirations": expiry})
 
     def get_expirations(self, ticker):
         return self.fetch("expirations", {"tickers": ticker})
