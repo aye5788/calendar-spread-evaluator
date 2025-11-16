@@ -1,43 +1,25 @@
-import requests
 import streamlit as st
+from modules.api import ORATSClient
 
-class ORATSClient:
-    def __init__(self):
-        self.base = st.secrets["orats"]["base_url"]
-        self.token = st.secrets["orats"]["api_key"]
+st.set_page_config(page_title="Expiration Dropdown Test")
 
-    # -----------------------------
-    # VALID DELAYED ENDPOINT: /strikes
-    # -----------------------------
-    def get_strikes(self, ticker: str):
-        url = f"{self.base}/strikes"
-        params = {
-            "ticker": ticker,
-            "token": self.token
-        }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        return r.json()
+st.title("🔽 ORATS Expiration Dropdown (Delayed Data)")
+st.caption("Simple test: Pull expirations for any ticker using /strikes")
 
-    # -----------------------------
-    # VALID DELAYED ENDPOINT: /summaries
-    # -----------------------------
-    def get_summary(self, ticker: str, expiration: str):
-        url = f"{self.base}/summaries"
-        params = {
-            "ticker": ticker,
-            "token": self.token
-        }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        data = r.json()
+client = ORATSClient()
 
-        # filter summary for the expiration
-        summaries = [d for d in data if d.get("expirDate") == expiration]
+ticker = st.text_input("Ticker", value="SLV").upper().strip()
 
-        if not summaries:
-            return None
+if ticker:
+    try:
+        expirations = client.get_expirations(ticker)
 
-        return summaries[0]
+        if expirations:
+            chosen = st.selectbox("Available Expirations", expirations)
+            st.success(f"Selected expiration: {chosen}")
+        else:
+            st.warning("No expirations found for this ticker.")
 
+    except Exception as e:
+        st.error(f"Error: {e}")
 
