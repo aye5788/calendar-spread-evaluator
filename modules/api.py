@@ -3,22 +3,31 @@ import streamlit as st
 
 class ORATSClient:
     def __init__(self):
-        self.base_url = st.secrets["orats"]["base_url"]
+        self.base_url = "https://api.orats.io/datav2"
         self.token = st.secrets["orats"]["api_key"]
 
-
-    def get_strikes(self, ticker: str):
-        """Pull delayed-data strikes, which include expiration dates."""
+    def get_expirations(self, ticker: str):
+        """
+        Pull all expirations using /strikes.
+        We extract unique 'expirDate' entries.
+        """
         url = f"{self.base_url}/strikes"
-        params = {"ticker": ticker, "token": self.token}
+        params = {
+            "token": self.token,
+            "ticker": ticker.upper()
+        }
 
         response = requests.get(url, params=params)
 
         if response.status_code != 200:
-            raise Exception(
-                f"ORATS error {response.status_code}: {response.text}"
-            )
+            raise Exception(f"ORATS error {response.status_code}: {response.text}")
 
-        return response.json()
+        data = response.json()
+
+        if "data" not in data:
+            return []
+
+        expirations = sorted({item["expirDate"] for item in data["data"]})
+        return expirations
 
 
