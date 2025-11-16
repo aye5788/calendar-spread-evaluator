@@ -1,82 +1,58 @@
-import json
 import requests
 import streamlit as st
+
+@st.cache_data
+def get_orats_base():
+    return st.secrets["orats"]["base_url"]
+
+@st.cache_data
+def get_orats_token():
+    return st.secrets["orats"]["api_key"]
 
 
 class ORATSClient:
     def __init__(self):
-        # token and base_url come from Streamlit secrets
-        self.token = st.secrets["orats"]["api_key"]
-        self.base = st.secrets["orats"]["base_url"]  # e.g. https://api.orats.io/datav2
+        self.base = get_orats_base()
+        self.token = get_orats_token()
 
     def fetch(self, endpoint, params=None):
-        """
-        Generic ORATS Delayed Data API caller.
-        Always passes ?token=... in the query string.
-        """
         if params is None:
             params = {}
 
-        # ORATS delayed API REQUIRES token as query param
+        # ALL delayed ORATS endpoints require token as query param
         params["token"] = self.token
 
         url = f"{self.base}/{endpoint}"
-        resp = requests.get(url, params=params)
-        resp.raise_for_status()
 
-        # Some ORATS responses may be plain JSON, some may nest under "data",
-        # some might even be JSON strings. Handle all three safely.
-        text = resp.text
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
 
-        try:
-            data = resp.json()
-        except ValueError:
-            data = json.loads(text)
+    def get_expirations(self, ticker):
+        # Delayed API: /datav2/expirations?ticker=SLV&token=XXX
+        return self.fetch("expirations", {"ticker": ticker})
 
-        # If it's a dict with "data" key, unwrap
-        if isinstance(data, dict) and "data" in data:
-            inner = data["data"]
-            if isinstance(inner, str):
-                return json.loads(inner)
-            return inner
+    def get_summary(self, ticker):
+        # Delayed API: /datav2/summaries?ticker=SLV&token=XXX
+        data = self.fetch("summaries", {"ticker": ticker})
+        return data[0] if isinstance(data, list) and data else None
 
-        # If it's a JSON string, parse
-        if isinstance(data, str):
-            return json.loads(data)
+    def get_strikes(self, ticker, expiry):
+        # need dte from summary
+        summary = self.get_summary(ticker)
+        if not summary:
+            return None
 
-        return data
+        dte = summary.get("dte")
+        if dte is None:
+            return None
 
-    # -------------------------
-    # ORATS endpoints we use
-    # -------------------------
+        # Delayed strikes endpoint requires: ticker, dte, fields
+        params = {
+            "ticker": ticker,
+            "dte": dte,
+            "fields": "strike,callBid,callAsk,putBid,putAsk"
+        }
 
-    def get_summaries(self, ticker: str):
-        """
-        Delayed summaries: /datav2/summaries?ticker=SLV&token=...
-        """
-        return self.fetch("summaries", {"ticker": ticker})
-
-    def get_monies(self, ticker: str):
-        """
-        Monies Implied: /datav2/monies/implied?ticker=SLV&token=...
-        """
-        return self.fetch("monies/implied", {"ticker": ticker})
-
-    def get_strikes(self, ticker: str, expiry: str | None = None):
-        """
-        Strikes: /datav2/strikes?ticker=SLV&token=...&expirations=YYYY-MM-DD
-        """
-        params = {"ticker": ticker}
-        if expiry:
-            params["expirations"] = expiry
         return self.fetch("strikes", params)
-
-    def get_expirations(self, ticker: str):
-        """
-        Delayed API has no /expirations endpoint.
-        We derive expirations from the strikes data.
-        """
-        strikes = self.get_strikes(ticker)
-        expirations = sorted({item["expiration"] for item in strikes})
-        return expirations
 
