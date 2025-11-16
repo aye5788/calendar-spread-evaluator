@@ -3,8 +3,9 @@ import streamlit as st
 
 class ORATSClient:
     def __init__(self):
-        self.base_url = "https://api.orats.io/datav2"
-        self.token = st.secrets["ORATS_TOKEN"]
+        self.base_url = st.secrets["orats"]["base_url"]
+        self.token = st.secrets["orats"]["api_key"]
+
 
     def get_strikes(self, ticker: str):
         """Pull delayed-data strikes, which include expiration dates."""
