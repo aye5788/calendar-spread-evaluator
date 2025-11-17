@@ -125,25 +125,71 @@ if st.button("SCAN"):
 
         st.success(f"Matched {len(matched_strikes)} strikes.")
 
-        # Build table
-        table = []
+                table = []
         for strike in matched_strikes:
             f = fdict[strike]
             b = bdict[strike]
 
+            front_mid = f.get("mid")
+            back_mid = b.get("mid")
+            front_iv = f.get("iv")
+            back_iv = b.get("iv")
+            front_vega = f.get("vega")
+            back_vega = b.get("vega")
+            front_theta = f.get("theta")
+            back_theta = b.get("theta")
+
+            # --- SCORING ---
+            debit = None
+            iv_ratio = None
+            vega_diff = None
+            theta_diff = None
+            score = None
+
+            if front_mid and back_mid:
+                debit = back_mid - front_mid
+
+            if front_iv and back_iv and front_iv > 0:
+                iv_ratio = back_iv / front_iv
+
+            if front_vega and back_vega:
+                vega_diff = back_vega - front_vega
+
+            if front_theta and back_theta:
+                theta_diff = front_theta - back_theta
+
+            # Weighted score (0–100)
+            if iv_ratio and debit and vega_diff is not None and theta_diff is not None:
+                score = (
+                    (iv_ratio * 40) +
+                    ((1 / max(debit, 0.01)) * 35) +
+                    (max(vega_diff, 0) * 15) +
+                    (max(theta_diff, 0) * 10)
+                )
+
             table.append({
                 "Strike": strike,
-                "Front Mid": f.get("mid"),
-                "Back Mid": b.get("mid"),
-                "Front IV": f.get("iv"),
-                "Back IV": b.get("iv"),
-                "Front Delta": f.get("delta"),
-                "Back Delta": b.get("delta"),
-                "Front Gamma": f.get("gamma"),
-                "Back Gamma": b.get("gamma"),
+                "Front Mid": front_mid,
+                "Back Mid": back_mid,
+                "Debit": debit,
+                "Front IV": front_iv,
+                "Back IV": back_iv,
+                "IV Ratio": iv_ratio,
+                "Vega Diff": vega_diff,
+                "Theta Diff": theta_diff,
+                "Score": round(score, 2) if score else None
             })
 
-        st.dataframe(table)
+        # Sort by score
+        table_sorted = sorted(
+            table,
+            key=lambda x: (x["Score"] is not None, x["Score"]),
+            reverse=True
+        )
+
+        st.subheader("📊 Scored Calendar Spread Candidates")
+        st.dataframe(table_sorted)
+
 
     except Exception as e:
         st.error(f"SCAN ERROR: {e}")
