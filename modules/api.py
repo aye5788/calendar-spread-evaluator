@@ -3,31 +3,48 @@ import streamlit as st
 
 class ORATSClient:
     def __init__(self):
-        self.base_url = "https://api.orats.io/datav2"
+        """
+        Loads credentials from Streamlit secrets.
+        """
+        self.base_url = st.secrets["orats"]["base_url"]
         self.token = st.secrets["orats"]["api_key"]
 
-    def get_expirations(self, ticker: str):
+    def get_strikes(self, ticker: str):
         """
-        Pull all expirations using /strikes.
-        We extract unique 'expirDate' entries.
+        Returns full strike list + expiration dates for a ticker.
+        NOTE: /strikes does NOT include mid/IV/greeks.
         """
         url = f"{self.base_url}/strikes"
         params = {
-            "token": self.token,
-            "ticker": ticker.upper()
+            "ticker": ticker,
+            "token": self.token
         }
+        resp = requests.get(url, params=params)
 
-        response = requests.get(url, params=params)
+        if resp.status_code != 200:
+            return None
 
-        if response.status_code != 200:
-            raise Exception(f"ORATS error {response.status_code}: {response.text}")
+        return resp.json()  # list of rows
 
-        data = response.json()
+    def get_core(self, ticker: str, expiration: str, strike: float):
+        """
+        Returns option mid, IV, greeks, etc. for a specific expiration + strike.
+        """
+        url = f"{self.base_url}/core"
+        params = {
+            "token": self.token,
+            "ticker": ticker,
+            "dte": expiration,
+            "strike": strike
+        }
+        resp = requests.get(url, params=params)
 
-        if "data" not in data:
-            return []
+        if resp.status_code != 200:
+            return None
 
-        expirations = sorted({item["expirDate"] for item in data["data"]})
-        return expirations
+        data = resp.json()
+        if not data:
+            return None
 
+        return data[0]  # core returns a list
 
