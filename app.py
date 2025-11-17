@@ -1,171 +1,86 @@
 import streamlit as st
-import requests
+import pandas as pd
+from modules.api import ORATSClient
 
-st.set_page_config(page_title="Calendar Spread Evaluator (ORATS)", layout="centered")
+st.set_page_config(page_title="Calendar Spread Evaluator", layout="wide")
 
-# -----------------------------
-# SECRETS (matches your secrets.toml exactly)
-# -----------------------------
-ORATS_TOKEN = st.secrets["orats"]["api_key"]
-BASE_URL = st.secrets["orats"]["base_url"]
+st.title("📅 ORATS Calendar Spread Evaluator (Delayed Data)")
+st.write("Scan and score calendar spreads using ORATS delayed-data endpoints.")
 
-
-# -----------------------------
-# GET EXPIRATIONS
-# -----------------------------
-def get_expirations(ticker):
-    """
-    Pulls /strikes data and extracts unique expirDate fields.
-    """
-    url = f"{BASE_URL}/strikes"
-    params = {"token": ORATS_TOKEN, "ticker": ticker.upper()}
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-
-    data = r.json()
-
-    if "data" not in data:
-        return []
-
-    expirations = sorted({row["expirDate"] for row in data["data"]})
-    return expirations
-
-
-# -----------------------------
-# GET STRIKES FOR SPECIFIC EXPIRATION
-# -----------------------------
-def get_strikes_for_expiry(ticker, expiration):
-    """
-    Fetch the entire strikes list then filter to the selected expirDate.
-    """
-    url = f"{BASE_URL}/strikes"
-    params = {"token": ORATS_TOKEN, "ticker": ticker.upper()}
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-
-    data = r.json()
-
-    if "data" not in data:
-        return []
-
-    filtered = [row for row in data["data"] if row["expirDate"] == expiration]
-    return filtered
-
-
-# -----------------------------
-# UI
-# -----------------------------
-st.title("📈 Calendar Spread Evaluator (ORATS Delayed Data)")
-st.write("Select ticker & expirations, then click **SCAN**.")
-
+# -------------------------------
+# INPUTS
+# -------------------------------
 ticker = st.text_input("Ticker", "SLV")
 
+client = ORATSClient()
 
-# -----------------------------
-# EXPIRATION DROPDOWNS
-# -----------------------------
-if ticker:
-    try:
-        expirations = get_expirations(ticker)
+run_scan = st.button("🔍 Scan")
 
-        if not expirations:
-            st.warning("No expirations found for this ticker.")
-            st.stop()
+exp1 = None
+exp2 = None
+expirations = []
 
-        col1, col2 = st.columns(2)
+# -------------------------------
+# RUN SCAN → GET EXPIRATIONS
+# -------------------------------
+if run_scan:
+    st.write(f"Fetching strikes for **{ticker}**…")
 
-        with col1:
-            front_exp = st.selectbox("Front expiration", expirations)
+    data = client.get_strikes(ticker)
 
-        with col2:
-            # Choose next expiry automatically
-            if len(expirations) > 1:
-                back_default = expirations.index(front_exp) + 1
-                back_default = min(back_default, len(expirations) - 1)
-            else:
-                back_default = 0
-
-            back_exp = st.selectbox("Back expiration", expirations, index=back_default)
-
-        st.info(f"Front: {front_exp}   |   Back: {back_exp}")
-
-    except Exception as e:
-        st.error(f"Error fetching expirations: {e}")
+    if not data:
+        st.error("No data returned from ORATS /strikes endpoint.")
         st.stop()
 
+    # Extract available expiration dates
+    expirations = sorted(list({row["dte"] for row in data}))
 
-# -----------------------------
-# SCAN BUTTON
-# -----------------------------
-if st.button("SCAN"):
-    st.write("Fetching strikes and matching…")
+    if len(expirations) < 2:
+        st.error("Not enough expirations available to build a calendar spread.")
+        st.stop()
 
-    try:
-        front_strikes = get_strikes_for_expiry(ticker, front_exp)
-        back_strikes = get_strikes_for_expiry(ticker, back_exp)
+    exp1 = st.selectbox("Front Month Expiration", expirations)
+    exp2 = st.selectbox("Back Month Expiration", expirations, index=1)
 
-        if not front_strikes:
-            st.error("No strikes found for the FRONT expiration.")
-            st.stop()
+    # Wait for user to choose expirations
+    if exp1 and exp2:
+        st.success(f"Selected: **{exp1} → {exp2}**")
 
-        if not back_strikes:
-            st.error("No strikes found for the BACK expiration.")
-            st.stop()
+        # Filter strikes
+        front_rows = [r for r in data if r["dte"] == exp1]
+        back_rows = [r for r in data if r["dte"] == exp2]
 
-        # Convert to dict by strike price
-        fdict = {row["strike"]: row for row in front_strikes}
-        bdict = {row["strike"]: row for row in back_strikes}
+        strikes_front = {r["strike"] for r in front_rows}
+        strikes_back = {r["strike"] for r in back_rows}
+        matched_strikes = sorted(strikes_front.intersection(strikes_back))
 
-        # Match common strikes
-        matched_strikes = sorted(set(fdict.keys()).intersection(bdict.keys()))
-
-        if not matched_strikes:
-            st.error("No common strikes between the selected expirations.")
-            st.stop()
-
-        st.success(f"Matched {len(matched_strikes)} strikes.")
+        st.write(f"Matched strikes found: **{len(matched_strikes)}**")
 
         table = []
+
         for strike in matched_strikes:
-            f = fdict[strike]
-            b = bdict[strike]
+            # Pull core option data
+            f = client.get_core(ticker, exp1, strike)
+            b = client.get_core(ticker, exp2, strike)
 
-            front_mid = f.get("mid")
-            back_mid = b.get("mid")
-            front_iv = f.get("iv")
-            back_iv = b.get("iv")
-            front_vega = f.get("vega")
-            back_vega = b.get("vega")
-            front_theta = f.get("theta")
-            back_theta = b.get("theta")
+            front_mid = f.get("mid") if f else None
+            back_mid  = b.get("mid") if b else None
+            front_iv  = f.get("iv") if f else None
+            back_iv   = b.get("iv") if b else None
+            front_theta = f.get("theta") if f else None
+            back_theta  = b.get("theta") if b else None
+            front_vega  = f.get("vega") if f else None
+            back_vega   = b.get("vega") if b else None
 
-            # --- SCORING ---
+            # Debit
             debit = None
-            iv_ratio = None
-            vega_diff = None
-            theta_diff = None
-            score = None
-
-            if front_mid and back_mid:
+            if front_mid is not None and back_mid is not None:
                 debit = back_mid - front_mid
 
-            if front_iv and back_iv and front_iv > 0:
-                iv_ratio = back_iv / front_iv
-
-            if front_vega and back_vega:
-                vega_diff = back_vega - front_vega
-
-            if front_theta and back_theta:
-                theta_diff = front_theta - back_theta
-
-            # Weighted score (0–100)
-            if iv_ratio and debit and vega_diff is not None and theta_diff is not None:
-                score = (
-                    (iv_ratio * 40) +
-                    ((1 / max(debit, 0.01)) * 35) +
-                    (max(vega_diff, 0) * 15) +
-                    (max(theta_diff, 0) * 10)
-                )
+            # Score (very simple version)
+            score = None
+            if front_iv and back_iv and back_iv > 0:
+                score = (back_iv - front_iv) / back_iv
 
             table.append({
                 "Strike": strike,
@@ -174,22 +89,13 @@ if st.button("SCAN"):
                 "Debit": debit,
                 "Front IV": front_iv,
                 "Back IV": back_iv,
-                "IV Ratio": iv_ratio,
-                "Vega Diff": vega_diff,
-                "Theta Diff": theta_diff,
-                "Score": round(score, 2) if score else None
+                "IV Ratio": (front_iv / back_iv) if front_iv and back_iv else None,
+                "Vega Diff": (back_vega - front_vega) if back_vega and front_vega else None,
+                "Theta Diff": (back_theta - front_theta) if back_theta and front_theta else None,
+                "Score": score,
             })
 
-        # Sort by score
-        table_sorted = sorted(
-            table,
-            key=lambda x: (x["Score"] is not None, x["Score"]),
-            reverse=True
-        )
+        df = pd.DataFrame(table)
 
-        st.subheader("📊 Scored Calendar Spread Candidates")
-        st.dataframe(table_sorted)
-
-
-    except Exception as e:
-        st.error(f"SCAN ERROR: {e}")
+        st.subheader("📊 Calendar Spread Results")
+        st.dataframe(df, use_container_width=True)
