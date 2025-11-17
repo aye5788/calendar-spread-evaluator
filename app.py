@@ -125,7 +125,7 @@ if st.button("SCAN"):
 
         st.success(f"Matched {len(matched_strikes)} strikes.")
 
-                table = []
+        table = []
         for strike in matched_strikes:
             f = fdict[strike]
             b = bdict[strike]
