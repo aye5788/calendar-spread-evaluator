@@ -27,6 +27,8 @@ if run_scan:
     st.write(f"Fetching strikes for **{ticker}**…")
 
     data = client.get_strikes(ticker)
+    st.write("DEBUG RAW:", data)
+
 
     if not data:
         st.error("No data returned from ORATS /strikes endpoint.")
