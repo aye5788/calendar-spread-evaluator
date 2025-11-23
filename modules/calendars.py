@@ -19,21 +19,33 @@ def extract_mid_price(row):
 
 
 def extract_iv(row):
-    """Use ORATS surface IV (smvVol)."""
+    """Use ORATS smoothed per-strike volatility."""
     return row.get("smvVol", None)
 
 
 def build_calendar_pairs(strikes, front_exp, back_exp):
     """
-    Build all matching strike (front, back) calendar spreads.
-    Returns a list of dictionaries ready to turn into a DataFrame.
+    Build calendar spreads using matching strikes and a moneyness filter.
+    Only ±15% moneyness is included.
     """
 
-    # --- Filter rows for each expiration ---
+    # -----------------------
+    # Get spot price
+    # -----------------------
+    spot_candidates = [row.get("stockPrice") for row in strikes if row.get("stockPrice") is not None]
+    if not spot_candidates:
+        return []
+    spot = float(spot_candidates[0])
+
+    # -----------------------
+    # Filter to chosen expirations
+    # -----------------------
     front_rows = [row for row in strikes if row["expirDate"] == front_exp]
     back_rows  = [row for row in strikes if row["expirDate"] == back_exp]
 
-    # --- Build dict for fast back-leg lookup ---
+    # -----------------------
+    # Build back expiration lookup by normalized strike
+    # -----------------------
     back_dict = {
         normalize_strike(r["strike"]): r
         for r in back_rows
@@ -42,24 +54,38 @@ def build_calendar_pairs(strikes, front_exp, back_exp):
 
     results = []
 
+    # -----------------------
+    # MAIN LOOP
+    # -----------------------
     for f in front_rows:
+
         strike = normalize_strike(f["strike"])
         if strike is None:
             continue
 
+        # -----------------------
+        # 1) APPLY MONEYNESS FILTER (±15%)
+        # -----------------------
+        moneyness = strike / spot
+        if not (0.85 <= moneyness <= 1.15):
+            continue
+
+        # -----------------------
+        # Match back leg
+        # -----------------------
         back = back_dict.get(strike)
         if not back:
-            continue  # No matching strike → skip
+            continue
 
-        # Extract mid prices
+        # Mid prices
         fm = extract_mid_price(f)
         bm = extract_mid_price(back)
 
-        # Extract IVs
+        # IVs
         fv = extract_iv(f)
         bv = extract_iv(back)
 
-        # Build row
+        # Build data row
         results.append({
             "Strike": strike,
             "Front Mid": fm,
