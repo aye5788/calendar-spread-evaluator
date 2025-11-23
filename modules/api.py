@@ -1,28 +1,52 @@
 import requests
 import streamlit as st
 
+BASE_URL = "https://api.orats.io/datav2"
+TOKEN = st.secrets["orats_api_key"]
+
 
 class ORATSClient:
-    def __init__(self):
-        cfg = st.secrets["orats"]
-        self.base_url = cfg["base_url"]
-        self.token = cfg["api_key"]
 
-    def get_strikes(self, ticker: str):
-        """Fetch the FULL strike chain list (not nested under 'data')."""
-        url = f"{self.base_url}/strikes?ticker={ticker}&token={self.token}"
-        resp = requests.get(url)
-        resp.raise_for_status()
+    def _get(self, endpoint, ticker):
+        url = f"{BASE_URL}/{endpoint}?token={TOKEN}&ticker={ticker}"
+        r = requests.get(url)
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        return data
 
-        raw = resp.json()
+    # -------------------------
+    # PUBLIC METHODS
+    # -------------------------
 
-        # raw is already the list based on your screenshots
-        if isinstance(raw, list):
-            return raw
+    def get_strikes(self, ticker):
+        return self._get("strikes", ticker)
 
-        # fallback if ORATS wraps it in "data" someday
-        if "data" in raw:
-            return raw["data"]
+    def get_cores(self, ticker):
+        cores = self._get("cores", ticker)
+        return cores[0] if cores else None
 
-        return []
+    def get_term_structure(self, ticker):
+        """
+        Pulls term structure info from 'cores' endpoint.
+        Maps expirations to iv buckets.
+        """
+        core = self.get_cores(ticker)
+        if not core:
+            return None
+
+        buckets = []
+        for i in range(1, 5):
+            iv_key = f"atmIvM{i}"
+            dte_key = f"dtExM{i}"
+            if core.get(iv_key) is not None and core.get(dte_key) is not None:
+                buckets.append({
+                    "iv": core[iv_key],
+                    "dte": core[dte_key],
+                    "bucket": f"M{i}"
+                })
+
+        return {
+            "core": core,
+            "buckets": buckets
+        }
 
