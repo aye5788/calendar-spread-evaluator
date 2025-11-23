@@ -1,29 +1,37 @@
 def score_calendar(row):
     """
-    Score a calendar spread row.
-    You can adjust weightings as desired.
+    Professional calendar scoring model.
+    Weighted blend of:
+    - debit efficiency
+    - vega differential
+    - theta differential
+    - extrinsic ratio
+    - term structure decay
     """
 
     score = 0
-    debit = row.get("Debit")
-    iv_ratio = row.get("IV Ratio")
-    vega_diff = row.get("Vega Diff")
-    theta_diff = row.get("Theta Diff")
 
-    # reward lower debit
-    if debit is not None:
-        score += max(0, 1.0 - debit / 2.0)
+    # 1) Debit sweet spot (cheap calendars score higher)
+    if row["Debit"] is not None:
+        if row["Debit"] < 0.20:  score += 2
+        elif row["Debit"] < 0.40: score += 1
 
-    # reward IV ratio > 1.0
-    if iv_ratio is not None:
-        score += (iv_ratio - 1.0) * 2
+    # 2) Vega advantage
+    if row["Vega Diff"] and row["Vega Diff"] > 0:
+        score += 2
 
-    # reward positive vega difference
-    if vega_diff is not None:
-        score += vega_diff * 0.1
+    # 3) Theta advantage (positive = good)
+    if row["Theta Diff"] and row["Theta Diff"] > 0:
+        score += 1
 
-    # reward positive theta difference
-    if theta_diff is not None:
-        score += theta_diff * 0.1
+    # 4) Extrinsic ratio (back leg > front leg)
+    er = row.get("Extrinsic Ratio")
+    if er:
+        if er > 1.3: score += 1
+        if er > 1.6: score += 1
 
-    return round(score, 4)
+    # 5) Term structure decay (back IV > front IV)
+    if row.get("IV Decay") and row["IV Decay"] > 0:
+        score += 2
+
+    return score
