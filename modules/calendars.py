@@ -1,145 +1,85 @@
 import numpy as np
 
 
-def normalize_strike(x):
-    try:
-        return float(x)
-    except:
+def mid_price(row):
+    """Compute mid price from bid/ask."""
+    bid = row.get("callBidPrice")
+    ask = row.get("callAskPrice")
+    if bid is None or ask is None:
         return None
+    return (bid + ask) / 2
 
 
-def extract_mid(row):
-    try:
-        bid = row.get("callBidPrice")
-        ask = row.get("callAskPrice")
-        if bid is None or ask is None:
-            return None
-        return (bid + ask) / 2
-    except:
-        return None
+def extract_iv(row):
+    """Use ORATS surface IV (smvVol)."""
+    return row.get("smvVol")
 
 
-def extrinsic_value(row):
-    """(Mid − intrinsic for CALL)"""
-    mid = extract_mid(row)
-    if mid is None:
-        return None
-
-    spot = row.get("stockPrice")
+def moneyness_filter(row, underlying):
+    """Return % moneyness."""
     strike = row.get("strike")
-    if spot is None or strike is None:
+    if not strike or not underlying:
         return None
-
-    intrinsic = max(spot - strike, 0)
-    return max(mid - intrinsic, 0)
-
-
-def map_expiration_to_iv(exp_dte, term_structure):
-    """
-    Match expiration DTE to closest ORATS IV bucket.
-    (Core-level ATM implied vol)
-    """
-    buckets = term_structure["buckets"]
-    if not buckets:
-        return None
-
-    best = min(
-        buckets,
-        key=lambda b: abs(b["dte"] - exp_dte)
-    )
-    return best["iv"]
+    return strike / underlying
 
 
 def build_calendar_pairs(strikes, front_exp, back_exp, term_structure):
-    """
-    Professional calendar model:
-    - moneyness filter
-    - greek differentials
-    - extrinsic
-    - debit
-    - term-structure IV
-    - IV decay advantage
-    """
+    """Full professional calendar pairing model."""
 
-    # Spot price
-    spot_candidates = [r["stockPrice"] for r in strikes if r.get("stockPrice") is not None]
-    if not spot_candidates:
-        return []
-    spot = float(spot_candidates[0])
-
-    # Filter rows by expiration
     front_rows = [r for r in strikes if r["expirDate"] == front_exp]
-    back_rows  = [r for r in strikes if r["expirDate"] == back_exp]
+    back_rows = [r for r in strikes if r["expirDate"] == back_exp]
+    back_map = {r["strike"]: r for r in back_rows}
 
-    # Map expiration DTE to core IV bucket
-    front_dte = front_rows[0]["dte"]
-    back_dte  = back_rows[0]["dte"]
-
-    front_iv_term = map_expiration_to_iv(front_dte, term_structure)
-    back_iv_term  = map_expiration_to_iv(back_dte, term_structure)
-
-    # Build lookup for back expiration
-    back_map = {
-        normalize_strike(r["strike"]): r
-        for r in back_rows
-    }
+    # Extract underlying from any strike
+    underlying = None
+    if strikes:
+        underlying = strikes[0].get("spotPrice")
 
     results = []
 
     for f in front_rows:
-
-        strike = normalize_strike(f["strike"])
-        if strike is None:
+        k = f["strike"]
+        b = back_map.get(k)
+        if b is None:
             continue
 
-        # -------------------------
-        # Moneyness filter (±15%)
-        # -------------------------
-        m = strike / spot
-        if not (0.85 <= m <= 1.15):
+        fm = mid_price(f)
+        bm = mid_price(b)
+
+        if fm is None or bm is None:
             continue
 
-        # Back leg
-        back = back_map.get(strike)
-        if not back:
-            continue
-
-        # Mid prices
-        fm = extract_mid(f)
-        bm = extract_mid(back)
-
-        # Extrinsic
-        fe = extrinsic_value(f)
-        be = extrinsic_value(back)
-
-        # Debit cost
-        debit = bm - fm if fm is not None and bm is not None else None
+        fv = extract_iv(f)
+        bv = extract_iv(b)
 
         # Greeks
-        vega_diff  = back.get("vega", 0)  - f.get("vega", 0)
-        theta_diff = back.get("theta", 0) - f.get("theta", 0)
-        gamma_diff = back.get("gamma", 0) - f.get("gamma", 0)
+        fvga = f.get("vega")
+        bvga = b.get("vega")
+        fth = f.get("theta")
+        bth = b.get("theta")
 
-        # IV decay advantage
-        iv_decay = None
-        if front_iv_term and back_iv_term:
-            iv_decay = back_iv_term - front_iv_term
+        vega_diff = (bvga - fvga) if (fvga is not None and bvga is not None) else None
+        theta_diff = (bth - fth) if (fth is not None and bth is not None) else None
+
+        # Term structure anchors
+        iv_anchor = None
+        if term_structure:
+            iv_anchor = term_structure.get("iv30d")
+
+        mn = moneyness_filter(f, underlying)
 
         results.append({
-            "Strike": strike,
+            "Strike": k,
             "Front Mid": fm,
             "Back Mid": bm,
-            "Debit": debit,
-            "Front Extrinsic": fe,
-            "Back Extrinsic": be,
-            "Extrinsic Ratio": (be / fe) if (fe and be) else None,
+            "Debit": bm - fm,
+            "Front IV": fv,
+            "Back IV": bv,
+            "IV Ratio": (bv / fv) if fv and bv else None,
             "Vega Diff": vega_diff,
             "Theta Diff": theta_diff,
-            "Gamma Diff": gamma_diff,
-            "Front Term IV": front_iv_term,
-            "Back Term IV": back_iv_term,
-            "IV Decay": iv_decay,
+            "Moneyness": mn,
+            "IV Anchor": iv_anchor,
         })
 
     return results
-
