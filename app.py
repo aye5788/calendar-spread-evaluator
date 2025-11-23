@@ -9,72 +9,61 @@ from modules.scoring import score_calendar
 st.set_page_config(page_title="ORATS Calendar Spread Evaluator", layout="wide")
 
 st.title("📅 ORATS Calendar Spread Evaluator (Delayed Data)")
-st.write("Scan and score calendar spreads using ORATS delayed-data endpoints.")
 
 
-# ---------------------------------------
-# TICKER INPUT
-# ---------------------------------------
-
+# -----------------------------
+# INPUTS
+# -----------------------------
 ticker = st.text_input("Ticker", value="SLV")
+scan = st.button("🔍 Scan")
 
-if st.button("🔍 Scan"):
-    # Load strikes and store them so they persist across reruns
-    client = ORATSClient()
+client = ORATSClient()
+
+if scan and ticker:
+    st.write(f"Fetching strikes for **{ticker}**…")
+
     strikes = client.get_strikes(ticker)
-
     if not strikes:
-        st.error("No strike data returned. Check ticker or ORATS token.")
+        st.error("No strikes returned. Check ticker or API key.")
         st.stop()
 
-    st.session_state["strikes"] = strikes
-    st.session_state["expirations"] = sorted(list(set([r["expirDate"] for r in strikes])))
-    st.session_state["ticker"] = ticker
+    expirations = sorted(list(set([row["expirDate"] for row in strikes])))
 
+    if len(expirations) < 2:
+        st.error("Not enough expirations.")
+        st.stop()
 
-# ---------------------------------------
-# IF WE HAVE STRIKES, SHOW EXPIRATION UI
-# ---------------------------------------
-
-if "strikes" in st.session_state:
-
-    st.success(f"Found {len(st.session_state['expirations'])} expiration dates.")
+    st.success(f"Found {len(expirations)} expiration dates.")
 
     col1, col2 = st.columns(2)
     with col1:
-        front_exp = st.selectbox(
-            "Front Expiration",
-            st.session_state["expirations"],
-            key="front_exp"
-        )
+        front_exp = st.selectbox("Front Expiration", expirations)
     with col2:
-        back_exp = st.selectbox(
-            "Back Expiration",
-            st.session_state["expirations"],
-            key="back_exp"
-        )
-
-    # ---------------------------------------
-    # BUILD CALENDARS BUTTON
-    # ---------------------------------------
+        back_exp = st.selectbox("Back Expiration", expirations, index=1)
 
     if st.button("📈 Build & Score Calendar Spreads"):
 
-        strikes = st.session_state["strikes"]
+        # Pull term structure
+        term_structure = client.get_term_structure(ticker)
 
-        calendar_rows = build_calendar_pairs(strikes, front_exp, back_exp)
+        calendar_rows = build_calendar_pairs(
+            strikes,
+            front_exp,
+            back_exp,
+            term_structure
+        )
 
         if not calendar_rows:
-            st.warning("No matching strikes found between chosen expirations.")
+            st.warning("No matching strikes found.")
             st.stop()
 
-        # Scoring
-        for row in calendar_rows:
-            row["Score"] = score_calendar(row)
+        # Score them
+        for r in calendar_rows:
+            r["Score"] = score_calendar(r)
 
-        df = pd.DataFrame(calendar_rows).sort_values("Score", ascending=False)
+        df = pd.DataFrame(calendar_rows)
+        df = df.sort_values("Score", ascending=False)
 
         st.subheader("📊 Calendar Spread Results")
-        st.dataframe(df, use_container_width=True)
-
+        st.dataframe(df, width="stretch")
 
