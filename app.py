@@ -5,6 +5,7 @@ from modules.api import ORATSClient
 from modules.calendars import build_calendar_pairs
 from modules.scoring import score_calendar
 
+
 st.set_page_config(page_title="ORATS Calendar Spread Evaluator", layout="wide")
 
 st.title("📅 ORATS Calendar Spread Evaluator (Delayed Data)")
