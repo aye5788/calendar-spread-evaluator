@@ -1,37 +1,46 @@
+import numpy as np
+
+
 def score_calendar(row):
-    """
-    Professional calendar scoring model.
-    Weighted blend of:
-    - debit efficiency
-    - vega differential
-    - theta differential
-    - extrinsic ratio
-    - term structure decay
-    """
+    """Composite scoring for calendars."""
 
     score = 0
 
-    # 1) Debit sweet spot (cheap calendars score higher)
-    if row["Debit"] is not None:
-        if row["Debit"] < 0.20:  score += 2
-        elif row["Debit"] < 0.40: score += 1
+    # 1. IV Ratio weighting
+    ivr = row.get("IV Ratio")
+    if ivr:
+        if ivr >= 1.10:
+            score += 3
+        elif ivr >= 1.05:
+            score += 2
+        elif ivr >= 1.00:
+            score += 1
 
-    # 2) Vega advantage
-    if row["Vega Diff"] and row["Vega Diff"] > 0:
-        score += 2
+    # 2. Debit favorability
+    debit = row.get("Debit")
+    if debit is not None:
+        if debit < 0.10:
+            score += 2
+        elif debit < 0.20:
+            score += 1
 
-    # 3) Theta advantage (positive = good)
-    if row["Theta Diff"] and row["Theta Diff"] > 0:
+    # 3. Vega exposure
+    vega = row.get("Vega Diff")
+    if vega is not None and vega > 0:
         score += 1
 
-    # 4) Extrinsic ratio (back leg > front leg)
-    er = row.get("Extrinsic Ratio")
-    if er:
-        if er > 1.3: score += 1
-        if er > 1.6: score += 1
+    # 4. Theta exposure
+    theta = row.get("Theta Diff")
+    if theta is not None and theta > 0:
+        score += 1
 
-    # 5) Term structure decay (back IV > front IV)
-    if row.get("IV Decay") and row["IV Decay"] > 0:
-        score += 2
+    # 5. Moneyness
+    mn = row.get("Moneyness")
+    if mn:
+        if 0.98 <= mn <= 1.02:
+            score += 2
+        elif 0.95 <= mn <= 1.05:
+            score += 1
 
     return score
+
